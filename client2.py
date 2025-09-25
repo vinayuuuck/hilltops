@@ -114,6 +114,39 @@ def analyze_state(state_tuple, R, C, N):
     }
 
 
+def count_local_minima(state_tuple, R, C, N):
+    mat = list(state_tuple)
+
+    def neighbors(idx):
+        r, c = divmod(idx, C)
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            r2, c2 = r + dr, c + dc
+            if 0 <= r2 < R and 0 <= c2 < C:
+                yield r2 * C + c2
+
+    global_min_idx = state_tuple.index(min(state_tuple))
+    L = 0
+    for idx in range(N):
+        if idx == global_min_idx:
+            continue
+        h = mat[idx]
+        has_lower = False
+        for nb in neighbors(idx):
+            if mat[nb] < h:
+                has_lower = True
+                break
+        if not has_lower:
+            L += 1
+    return L
+
+
+def heuristic(state_tuple, R, C, N):
+    L = count_local_minima(state_tuple, R, C, N)
+    h_local = (L + 1) // 2
+
+    return h_local
+
+
 def find_swaps(M, prefer_trapped_only=True, time_limit=60):
     R = len(M)
     C = len(M[0])
@@ -131,7 +164,7 @@ def find_swaps(M, prefer_trapped_only=True, time_limit=60):
     heapq.heappush(
         pq,
         (
-            0 if start_info["perfect"] else 1,
+            heuristic(start, R, C, N),
             0,
             start,
             [],
@@ -206,7 +239,7 @@ def find_swaps(M, prefer_trapped_only=True, time_limit=60):
                 seen[new_tuple] = newg
                 continue
             seen[new_tuple] = newg
-            h = 1
+            h = heuristic(new_tuple, R, C, N)
             heapq.heappush(pq, (newg + h, newg, new_tuple, path + [(i, j)], new_info))
     if goal_candidate is not None:
         return goal_candidate[1]
