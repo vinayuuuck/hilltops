@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import subprocess
 import argparse
+from collections import deque
+import heapq, time
 
 
 def _readline(pipe) -> str:
@@ -35,12 +37,140 @@ def _read_matrix(stdout):
     return R, C, M
 
 
-def your_algorithm(M):
-    """
-    This function gets a matrix, and returns swaps
-    You only need to edit this
-    """
-    return [[0, 0, 2, 2], [1, 0, 1, 2]]
+def to_tuple(mat):
+    return tuple(x for row in mat for x in row)
+
+
+def from_tuple(t, R, C):
+    return [list(t[i * C : (i + 1) * C]) for i in range(R)]
+
+
+def idx_to_rc(i, C):
+    return divmod(i, C)
+
+
+def rc_to_idx(r, c, C):
+    return r * C + c
+
+
+def analyze_state(state_tuple, R, C, N):
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    mat = from_tuple(state_tuple, R, C)
+    minval = min(state_tuple)
+    minidx = state_tuple.index(minval)
+    edges = [[] for _ in range(N)]
+    for idx in range(N):
+        r, c = idx_to_rc(idx, C)
+        h = mat[r][c]
+        for dr, dc in dirs:
+            r2, c2 = r + dr, c + dc
+            if 0 <= r2 < R and 0 <= c2 < C:
+                if mat[r2][c2] < h:
+                    edges[idx].append(rc_to_idx(r2, c2, C))
+    rev = [[] for _ in range(N)]
+    for u in range(N):
+        for v in edges[u]:
+            rev[v].append(u)
+    q = deque([minidx])
+    reachable = [False] * N
+    reachable[minidx] = True
+    while q:
+        v = q.popleft()
+        for u in rev[v]:
+            if not reachable[u]:
+                reachable[u] = True
+                q.append(u)
+    if not all(reachable):
+        trapped = [i for i, ok in enumerate(reachable) if not ok]
+        return {"perfect": False, "trapped": trapped, "minidx": minidx}
+    memo = {}
+
+    def longest_to_min(u):
+        if u == minidx:
+            return 0
+        if u in memo:
+            return memo[u]
+        best = 0
+        for v in edges[u]:
+            cand = 1 + longest_to_min(v)
+            if cand > best:
+                best = cand
+        memo[u] = best
+        return best
+
+    worst_by_node = [longest_to_min(i) for i in range(N)]
+    max_worst = max(worst_by_node)
+    return {
+        "perfect": True,
+        "max_worst": max_worst,
+        "worst_by_node": worst_by_node,
+        "minidx": minidx,
+    }
+
+
+def heuristic(state_tuple, R, C, N):
+    info = analyze_state(state_tuple, R, C, N)
+    return 0 if info["perfect"] else 1
+
+
+def find_swaps(M, max_expansions=200000, prefer_trapped_only=True, time_limit=30):
+    R = len(M)
+    C = len(M[0])
+    N = R * C
+
+    start = to_tuple(M)
+    start_info = analyze_state(start, R, C, N)
+    if start_info["perfect"]:
+        return []
+
+    start_time = time.time()
+    pq = []
+
+    heapq.heappush(pq, (heuristic(start, R, C, N), 0, start, []))
+    seen = {start: 0}
+    expansions = 0
+
+    all_pairs = [(i, j) for i in range(N) for j in range(i + 1, N)]
+    while pq:
+        if time.time() - start_time > time_limit:
+            break
+        f, g, state, path = heapq.heappop(pq)
+        if seen.get(state, 1e9) < g:
+            continue
+        info = analyze_state(state, R, C, N)
+        if info["perfect"]:
+            return [
+                (
+                    idx_to_rc(a, C)[0],
+                    idx_to_rc(a, C)[1],
+                    idx_to_rc(b, C)[0],
+                    idx_to_rc(b, C)[1],
+                )
+                for (a, b) in path
+            ]
+        expansions += 1
+        if expansions > max_expansions:
+            break
+        trapped = info.get("trapped", [])
+        candidate_pairs = all_pairs
+        if prefer_trapped_only and trapped:
+            trapped_set = set(trapped)
+            candidate_pairs = []
+            for i in range(N):
+                for j in range(i + 1, N):
+                    if i in trapped_set or j in trapped_set:
+                        candidate_pairs.append((i, j))
+        for i, j in candidate_pairs:
+            lst = list(state)
+            lst[i], lst[j] = lst[j], lst[i]
+            newt = tuple(lst)
+            ng = g + 1
+            if seen.get(newt, 1e9) <= ng:
+                continue
+            seen[newt] = ng
+            h = heuristic(newt, R, C, N)
+            heapq.heappush(pq, (ng + h, ng, newt, path + [(i, j)]))
+    return None
 
 
 def run_play(name: str, port: int):
@@ -78,7 +208,7 @@ def run_play(name: str, port: int):
             raise RuntimeError(f"Expected 'SEND_SWAPS', got: {token!r}")
 
         # 5) Send swaps
-        swaps = your_algorithm(M)
+        swaps = find_swaps(M)
 
         proc.stdin.write(f"{len(swaps)}\n")
         for x1, y1, x2, y2 in swaps:

@@ -266,5 +266,5 @@ __marimo__/
 
 
 ### Game specific
-*.txt
+session_*.txt
 hilltops_server
